@@ -1,0 +1,15 @@
+services:
+  noel:
+    build: .
+    container_name: noel
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Code à connaître pour créer un compte (laisse vide pour désactiver)
+      FAMILY_CODE: "change-moi"
+      # Mettre à 1 une fois le site servi en HTTPS (reverse proxy)
+      COOKIE_SECURE: "0"
+    volumes:
+      # Données (comptes, cadeaux, photos)
+      - ./data:/data

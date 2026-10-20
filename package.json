@@ -1,0 +1,14 @@
+{
+  "name": "noel",
+  "version": "1.0.0",
+  "description": "Listes de cadeaux de Noël en famille",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "reset-pin": "node scripts/reset-pin.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
