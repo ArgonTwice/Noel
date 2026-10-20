@@ -52,7 +52,16 @@
   const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const fail = (status, error) => json(status, { error });
   const clean = (v, max) => String(v ?? '').trim().slice(0, max);
-  const pub = (u) => ({ id: u.id, name: u.name, avatar: u.avatar || '🎅', hasPin: Boolean(u.pin), letter: u.letter || '' });
+  const PAPERS = ['airmail', 'holly', 'gold', 'snow'];
+  const pub = (u) => ({ id: u.id, name: u.name, avatar: u.avatar || '🎅', hasPin: Boolean(u.pin), letter: u.letter || '', paper: PAPERS.includes(u.paper) ? u.paper : 'airmail' });
+
+  function derange(ids) {
+    let to;
+    do {
+      to = [...ids].sort(() => Math.random() - 0.5);
+    } while (to.some((id, i) => id === ids[i]));
+    return Object.fromEntries(ids.map((id, i) => [id, to[i]]));
+  }
   const me = () => db.users.find((u) => u.id === db.me);
 
   function fields(b) {
@@ -112,17 +121,34 @@
         me: pub(user),
         users: db.users.map((u) => ({
           ...pub(u),
-          gifts: db.gifts.filter((x) => x.userId === u.id).map(({ claimedBy, userId, ...x }) => ({
+          gifts: db.gifts.filter((x) => x.userId === u.id).map(({ claimedBy, userId, bought, ...x }) => ({
             ...x,
             claimedBy: u.id === user.id ? null : claimedBy ? { id: claimedBy, name: byId[claimedBy]?.name || '?' } : null,
+            bought: u.id !== user.id && claimedBy === user.id && Boolean(bought),
           })),
         })),
+        draw: db.draw && {
+          at: db.draw.at,
+          by: db.draw.by,
+          budget: db.draw.budget || '',
+          count: Object.keys(db.draw.pairs).length,
+          target: db.users.filter((u) => u.id === db.draw.pairs[user.id]).map(pub)[0] || null,
+        },
       });
+    }
+
+    if (path === '/api/draw') {
+      if (db.draw && !body.redo) return fail(409, 'Le tirage a déjà eu lieu');
+      if (db.users.length < 3) return fail(400, 'Il faut au moins 3 personnes pour un tirage');
+      db.draw = { at: Date.now(), by: user.name, budget: clean(body.budget, 20), pairs: derange(db.users.map((u) => u.id)) };
+      save();
+      return json(200, { ok: true });
     }
 
     if (path === '/api/profile' && method === 'PUT') {
       if (body.avatar && AVATARS.includes(body.avatar)) user.avatar = body.avatar;
       if (typeof body.letter === 'string') user.letter = clean(body.letter, 600);
+      if (PAPERS.includes(body.paper)) user.paper = body.paper;
       if (body.pin === null) user.pin = '';
       else if (typeof body.pin === 'string' && body.pin.trim()) {
         if (body.pin.trim().length < 4) return fail(400, 'Ton code doit faire au moins 4 caractères');
@@ -158,14 +184,22 @@
       return json(200, { ok: true });
     }
 
-    const m = path.match(/^\/api\/gifts\/([a-f0-9]+)(\/claim)?$/);
+    const m = path.match(/^\/api\/gifts\/([a-f0-9]+)(\/claim|\/bought)?$/);
     const gift = m && db.gifts.find((x) => x.id === m[1]);
     if (!gift) return fail(404, 'Introuvable');
 
-    if (m[2]) {
+    if (m[2] === '/claim') {
       if (gift.userId === user.id) return fail(403, 'Tu ne peux pas réserver ton propre cadeau');
       if (gift.claimedBy && gift.claimedBy !== user.id) return fail(409, 'Déjà réservé par quelqu’un d’autre');
       gift.claimedBy = gift.claimedBy ? null : user.id;
+      gift.bought = false;
+      save();
+      return json(200, { ok: true });
+    }
+
+    if (m[2] === '/bought') {
+      if (gift.claimedBy !== user.id) return fail(403, 'Tu ne l’as pas réservé');
+      gift.bought = !gift.bought;
       save();
       return json(200, { ok: true });
     }

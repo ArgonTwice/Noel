@@ -260,7 +260,16 @@ function giftFields(body) {
 
 const AVATARS = ['🦊', '🐻', '🐼', '🦁', '🐯', '🐸', '🐧', '🦉', '🐙', '🦄', '🐢', '🐰', '🎅', '🤶', '⛄', '🦌', '🧝', '🐶', '🐱', '🐨'];
 
-const publicUser = (u) => ({ id: u.id, name: u.name, avatar: u.avatar || '🎅', hasPin: Boolean(u.hash), letter: u.letter || '' });
+const PAPERS = ['airmail', 'holly', 'gold', 'snow'];
+
+const publicUser = (u) => ({
+  id: u.id,
+  name: u.name,
+  avatar: u.avatar || '🎅',
+  hasPin: Boolean(u.hash),
+  letter: u.letter || '',
+  paper: PAPERS.includes(u.paper) ? u.paper : 'airmail',
+});
 
 function view(db, me) {
   const byId = Object.fromEntries(db.users.map((u) => [u.id, u]));
@@ -270,12 +279,41 @@ function view(db, me) {
       ...publicUser(u),
       gifts: db.gifts
         .filter((g) => g.userId === u.id)
-        .map(({ claimedBy, ...g }) => ({
+        .map(({ claimedBy, bought, ...g }) => ({
           ...g,
           // On ne montre jamais à quelqu'un qui a reçu l'idée si elle est prise : la surprise reste entière
           claimedBy: u.id === me.id ? null : claimedBy ? { id: claimedBy, name: byId[claimedBy]?.name || '?' } : null,
+          // « Acheté » n'est visible que par la personne qui offre
+          bought: u.id !== me.id && claimedBy === me.id && Boolean(bought),
         })),
     })),
+    draw: drawFor(db, me),
+  };
+}
+
+// Tirage au sort : personne ne reçoit son propre nom
+function derange(ids) {
+  let to;
+  do {
+    to = [...ids];
+    for (let i = to.length - 1; i > 0; i--) {
+      const j = crypto.randomInt(i + 1);
+      [to[i], to[j]] = [to[j], to[i]];
+    }
+  } while (to.some((id, i) => id === ids[i]));
+  return Object.fromEntries(ids.map((id, i) => [id, to[i]]));
+}
+
+// Chacun ne voit que sa propre personne tirée, jamais les autres couples
+function drawFor(db, me) {
+  if (!db.draw) return null;
+  const target = db.users.find((u) => u.id === db.draw.pairs[me.id]);
+  return {
+    at: db.draw.at,
+    by: db.draw.by,
+    budget: db.draw.budget || '',
+    count: Object.keys(db.draw.pairs).length,
+    target: target ? publicUser(target) : null,
   };
 }
 
@@ -361,12 +399,22 @@ async function api(req, res, pathname) {
     const body = await readJson(req);
     if (body.avatar) me.avatar = cleanAvatar(body.avatar);
     if (typeof body.letter === 'string') me.letter = clean(body.letter, 600);
+    if (PAPERS.includes(body.paper)) me.paper = body.paper;
     if (body.pin === null) {
       delete me.hash;
       delete me.salt;
     } else if (typeof body.pin === 'string' && body.pin.trim()) {
       Object.assign(me, hashPin(cleanPin(body.pin)));
     }
+    writeDb(db);
+    return send(res, 200, { ok: true });
+  }
+
+  if (method === 'POST' && pathname === '/api/draw') {
+    const body = await readJson(req);
+    if (db.draw && !body.redo) throw new HttpError(409, 'Le tirage a déjà eu lieu');
+    if (db.users.length < 3) throw new HttpError(400, 'Il faut au moins 3 personnes pour un tirage');
+    db.draw = { at: Date.now(), by: me.name, budget: clean(body.budget, 20), pairs: derange(db.users.map((u) => u.id)) };
     writeDb(db);
     return send(res, 200, { ok: true });
   }
@@ -390,19 +438,28 @@ async function api(req, res, pathname) {
     return send(res, 200, { ok: true });
   }
 
-  const match = pathname.match(/^\/api\/gifts\/([a-f0-9]+)(\/claim)?$/);
+  const match = pathname.match(/^\/api\/gifts\/([a-f0-9]+)(\/claim|\/bought)?$/);
   if (match) {
     const gift = db.gifts.find((g) => g.id === match[1]);
     if (!gift) throw new HttpError(404, 'Cadeau introuvable');
 
-    if (match[2] && method === 'POST') {
+    if (match[2] === '/claim' && method === 'POST') {
       if (gift.userId === me.id) throw new HttpError(403, 'Tu ne peux pas réserver ton propre cadeau');
       if (gift.claimedBy && gift.claimedBy !== me.id) throw new HttpError(409, 'Déjà réservé par quelqu’un d’autre');
       gift.claimedBy = gift.claimedBy ? null : me.id;
+      gift.bought = false;
       writeDb(db);
       return send(res, 200, { ok: true });
     }
 
+    if (match[2] === '/bought' && method === 'POST') {
+      if (gift.claimedBy !== me.id) throw new HttpError(403, 'Tu ne l’as pas réservé');
+      gift.bought = !gift.bought;
+      writeDb(db);
+      return send(res, 200, { ok: true });
+    }
+
+    if (match[2]) throw new HttpError(404, 'Introuvable');
     if (gift.userId !== me.id) throw new HttpError(403, 'Ce n’est pas ta liste');
 
     if (method === 'PUT') {

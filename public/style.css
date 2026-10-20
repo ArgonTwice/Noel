@@ -283,7 +283,7 @@ details.opt p { margin: 4px 0 8px; }
   color: var(--ink);
   background: var(--paper);
   border: 9px solid transparent;
-  border-image: var(--airmail) 9;
+  border-image: var(--frame, var(--airmail)) 9;
   padding: 14px 16px 14px;
   box-shadow: var(--shadow);
   transition: transform 0.18s ease, box-shadow 0.18s ease;
@@ -335,7 +335,7 @@ details.opt p { margin: 4px 0 8px; }
   position: relative;
   background: var(--paper);
   border: 12px solid transparent;
-  border-image: var(--airmail) 12;
+  border-image: var(--frame, var(--airmail)) 12;
   box-shadow: var(--shadow);
   padding: 22px 22px 26px 22px;
 }
@@ -469,7 +469,7 @@ a.store:hover { background: var(--line); color: var(--red); }
 .group-head { display: flex; align-items: center; gap: 12px; padding: 14px 0 6px; }
 .group-head a { font-family: var(--script); font-size: 32px; line-height: 1; color: var(--pen); text-decoration: none; }
 .group-head .sum { margin-left: auto; font-weight: 800; color: var(--muted); font-size: 14px; }
-.budget { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--ink); color: #fff; border-radius: var(--radius); padding: 14px 18px; margin-bottom: 18px; }
+.budget { background: var(--ink); color: #fff; border-radius: var(--radius); padding: 14px 18px 16px; margin-bottom: 18px; }
 .budget strong { font-family: var(--serif); font-size: 26px; color: var(--gold); }
 .page-title { font-size: 30px; margin-bottom: 4px; }
 .page-sub { color: var(--muted); margin-bottom: 18px; }
@@ -506,3 +506,66 @@ dialog h2 { font-size: 24px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .status { font-size: 13px; color: var(--muted); margin-top: 6px; min-height: 18px; }
 .chips.pick { margin: 6px 0 0; }
+
+/* ---------- Papiers à lettres ---------- */
+.theme-holly { --frame: repeating-linear-gradient(135deg, #1f6b4a 0 12px, #fffaf0 12px 24px, #c0322f 24px 36px, #fffaf0 36px 48px); }
+.theme-gold { --frame: repeating-linear-gradient(135deg, #c9972b 0 12px, #fff3cf 12px 24px); }
+.theme-snow { --frame: repeating-linear-gradient(135deg, #5b8ed6 0 12px, #ffffff 12px 24px, #9bbcec 24px 36px, #ffffff 36px 48px); }
+.swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.swatch { border: 2px solid transparent; background: #fff; border-radius: 12px; padding: 8px 4px 6px; font-weight: 800; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; box-shadow: inset 0 0 0 1.5px var(--line); }
+.swatch .chip-frame { width: 100%; height: 26px; border: 6px solid transparent; border-image: var(--frame, var(--airmail)) 6; background: var(--paper); }
+.swatch[aria-pressed=true] { border-color: var(--red); box-shadow: 0 0 0 3px rgba(184, 49, 47, 0.18); }
+
+/* ---------- Bannière d'accueil : deux boutons ---------- */
+.hero-actions { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+.hero .btn.glass { background: rgba(255, 255, 255, 0.16); color: #fff; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.35); }
+.hero .btn.glass:hover { background: rgba(255, 255, 255, 0.26); }
+@media (max-width: 520px) { .hero-actions { width: 100%; flex-direction: row; flex-wrap: wrap; } .hero-actions .btn { flex: 1; } }
+
+/* ---------- Père Noël secret ---------- */
+.santa { display: flex; gap: 16px; align-items: center; margin-top: 22px; padding: 18px; background: #fff; border-radius: 18px; border: 2px dashed #e0b7b3; box-shadow: var(--shadow); }
+.santa-ico { font-size: 52px; line-height: 1; flex: none; animation: sway 4s ease-in-out infinite; }
+.santa-body { min-width: 0; flex: 1; }
+.santa-body h2 { font-size: 21px; }
+.santa-body p { color: var(--muted); margin: 4px 0 10px; font-size: 15px; }
+.santa-foot { margin: 10px 0 0 !important; font-size: 13px !important; }
+.santa-foot .link { padding: 0; font-size: 13px; }
+.seal { border: 0; color: #fff; font-weight: 800; border-radius: 999px; padding: 12px 22px; min-height: 48px; background: radial-gradient(circle at 35% 30%, #e0453f, #a61f1c); box-shadow: 0 3px 0 #7d1513, 0 8px 18px rgba(166, 31, 28, 0.35); animation: beat 2.4s ease-in-out infinite; }
+@keyframes beat { 50% { transform: scale(1.04); } }
+.reveal { display: flex; align-items: center; gap: 14px; margin: 8px 0 12px; animation: flip 0.5s ease; }
+@keyframes flip { from { transform: rotateX(80deg) scale(0.9); opacity: 0; } }
+.reveal-name { font-family: var(--script); font-size: 44px; line-height: 1; color: var(--pen); }
+.santa-budget { margin: 2px 0 0 !important; }
+.santa-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.santa-banner { background: #fff3d6; border: 2px dashed var(--gold); border-radius: 14px; padding: 10px 16px; font-weight: 800; margin-bottom: 18px; }
+@media (max-width: 520px) { .santa { align-items: flex-start; } .santa-ico { font-size: 40px; } }
+
+/* ---------- À offrir : progression ---------- */
+.budget-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.progress { height: 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.18); margin-top: 12px; overflow: hidden; }
+.progress span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #6fcf97, #e7b850); transition: width 0.5s ease; }
+.budget-sub { margin-top: 6px; font-size: 13px; color: #d8d0c4; font-weight: 700; }
+.chips + .chips { margin-top: 0; }
+.price-chip { border-style: dashed; }
+
+/* ---------- Surprends-moi ---------- */
+.surprise-card { display: flex; align-items: center; gap: 16px; margin: 16px 0 6px; }
+
+/* ---------- Neige sur tout le site ---------- */
+.snowfall { position: fixed; inset: 0; z-index: 60; pointer-events: none; overflow: hidden; }
+.snowfall::before, .snowfall::after {
+  content: "";
+  position: absolute;
+  inset: -100% 0 0 0;
+  background-image:
+    radial-gradient(4px 4px at 30px 40px, #fff 45%, #b9d0e8 58%, transparent 66%),
+    radial-gradient(3px 3px at 150px 130px, #fff 45%, #b9d0e8 58%, transparent 66%),
+    radial-gradient(4px 4px at 260px 70px, #fff 45%, #b9d0e8 58%, transparent 66%),
+    radial-gradient(3px 3px at 90px 220px, #fff 45%, #b9d0e8 58%, transparent 66%),
+    radial-gradient(3px 3px at 330px 200px, #fff 45%, #b9d0e8 58%, transparent 66%);
+  background-size: 380px 280px;
+  animation: fall 24s linear infinite;
+  opacity: 0.9;
+}
+.snowfall::after { background-size: 290px 230px; animation-duration: 36s; animation-direction: reverse; opacity: 0.6; }
+@media (prefers-reduced-motion: reduce) { .snowfall { display: none; } }

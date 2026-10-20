@@ -1,8 +1,38 @@
 'use strict';
 
 const root = document.getElementById('app');
-const state = { config: null, data: null, snapshot: '', sort: 'love', cat: null, viewKey: '' };
+const state = { config: null, data: null, snapshot: '', sort: 'love', cat: null, price: 'all', revealed: false, viewKey: '' };
 let shell = null;
+
+const PAPERS = [['airmail', 'Par avion'], ['holly', 'Houx'], ['gold', 'Doré'], ['snow', 'Neige']];
+const PRICE_BANDS = {
+  all: ['Tous les prix', () => true],
+  low: ['Moins de 20 €', (p) => p < 20],
+  mid: ['20 – 50 €', (p) => p >= 20 && p <= 50],
+  high: ['Plus de 50 €', (p) => p > 50],
+};
+
+function snowEnabled() {
+  try {
+    return localStorage.getItem('noel-snow') !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function setSnow(on) {
+  try {
+    localStorage.setItem('noel-snow', on ? 'on' : 'off');
+  } catch {}
+  applySnow();
+}
+
+function applySnow() {
+  document.querySelector('.snowfall')?.remove();
+  if (snowEnabled()) document.body.append(h('div', { class: 'snowfall', 'aria-hidden': 'true' }));
+}
+
+const paperClass = (u) => `theme-${u.paper || 'airmail'}`;
 
 const SUGGESTED_CATEGORIES = ['Jeux & loisirs', 'Livres', 'Vêtements', 'Maison', 'High-tech', 'Beauté', 'Gourmandise', 'Sport'];
 const SORTS = { love: 'Coups de cœur d’abord', recent: 'Les plus récents', 'price-asc': 'Prix croissant', 'price-desc': 'Prix décroissant' };
@@ -341,6 +371,7 @@ function renderView() {
   if (viewKey !== state.viewKey) {
     state.viewKey = viewKey;
     state.cat = null;
+    state.price = 'all';
   }
   const view = { home: viewHome, letter: viewLetter, offrir: viewOffrir, search: viewSearch }[r.name](r);
   shell.main.replaceChildren(...[].concat(view).flat(Infinity).filter(Boolean));
@@ -351,7 +382,7 @@ function renderView() {
 function viewHome() {
   const { me, users } = state.data;
   const ordered = [users.find((u) => u.id === me.id), ...users.filter((u) => u.id !== me.id)];
-  const recent = allGifts().filter((g) => g.owner.id !== me.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 12);
+  const available = availableGifts();
 
   return [
     h('section', { class: 'hero' },
@@ -360,15 +391,19 @@ function viewHome() {
         h('h1', {}, `Coucou ${me.name} !`),
         h('p', {}, 'Chacun écrit sa lettre au Père Noël : des idées, des liens, des photos. Ouvre celles des autres et réserve en cachette de quoi leur faire plaisir.'),
         h('span', { class: 'days' }, countdownText())),
-      h('a', { class: 'btn', href: `#/u/${me.id}` }, '✏️ Écrire ma lettre')),
+      h('div', { class: 'hero-actions' },
+        h('a', { class: 'btn', href: `#/u/${me.id}` }, '✏️ Écrire ma lettre'),
+        available.length ? h('button', { class: 'btn glass', onclick: openSurprise }, '🎲 Surprends-moi') : null)),
+
+    santaCard(),
 
     h('div', { class: 'section-title' }, h('h2', {}, 'La boîte aux lettres'), h('small', {}, plural(users.length, 'lettre', 'lettres'))),
     h('div', { class: 'mailbox' }, ordered.map((u) => envelope(u, u.id === me.id))),
 
-    recent.length ? [
-      h('div', { class: 'section-title' }, h('h2', {}, 'Dernières idées'), h('span', { class: 'script' }, 'tout frais sorti de l’atelier')),
+    available.length ? [
+      h('div', { class: 'section-title' }, h('h2', {}, 'Encore disponibles'), h('span', { class: 'script' }, 'ils attendent leur Père Noël')),
       h('div', { class: 'recent' },
-        recent.map((g) =>
+        available.slice(0, 12).map((g) =>
           h('a', { class: 'mini', href: `#/u/${g.owner.id}` },
             h('div', { class: 'pic' }, g.image ? h('img', { src: g.image, alt: '', loading: 'lazy' }) : '🎁'),
             h('div', { class: 'b' },
@@ -379,11 +414,123 @@ function viewHome() {
   ];
 }
 
+// Cadeaux des autres que personne n'a encore réservés, du plus récent au plus ancien
+const availableGifts = () =>
+  allGifts().filter((g) => g.owner.id !== state.data.me.id && !g.claimedBy).sort((a, b) => b.createdAt - a.createdAt);
+
+// --- Père Noël secret ---
+
+function santaCard() {
+  const { draw, users } = state.data;
+  const enough = users.length >= 3;
+  const box = (...content) => h('section', { class: 'santa' }, h('div', { class: 'santa-ico', 'aria-hidden': 'true' }, '🎅'), h('div', { class: 'santa-body' }, content));
+
+  if (!draw) {
+    return box(
+      h('h2', {}, 'Le Père Noël secret'),
+      h('p', {}, enough
+        ? 'Un tirage au sort pour que chacun offre un cadeau à une personne de la famille. Seul toi verras qui tu as tiré.'
+        : 'Il faut au moins 3 personnes dans la famille pour lancer un tirage au sort.'),
+      enough ? h('button', { class: 'btn small', onclick: () => openDrawDialog(false) }, '🎲 Lancer le tirage') : null);
+  }
+
+  const foot = h('p', { class: 'santa-foot' }, `Tirage lancé par ${draw.by}. `,
+    h('button', { class: 'link', onclick: () => openDrawDialog(true) }, 'Refaire le tirage'));
+  const t = draw.target;
+
+  if (!t) {
+    return box(h('h2', {}, 'Le Père Noël secret'), h('p', {}, 'Le tirage a eu lieu avant ton arrivée : tu n’en fais pas partie cette année.'), foot);
+  }
+  if (!state.revealed) {
+    return box(
+      h('h2', {}, 'Ton Père Noël secret est prêt'),
+      h('p', {}, 'Le tirage est fait. Assure-toi que personne ne regarde ton écran, puis ouvre l’enveloppe.'),
+      h('button', { class: 'seal', onclick: () => { state.revealed = true; renderView(); } }, '🤫 Découvrir qui j’ai tiré'),
+      foot);
+  }
+  return box(
+    h('h2', {}, 'Tu offres un cadeau à…'),
+    h('div', { class: 'reveal' },
+      avatar(t, 64),
+      h('div', {},
+        h('div', { class: 'reveal-name' }, t.name),
+        draw.budget ? h('p', { class: 'santa-budget' }, `Budget conseillé : ${draw.budget}`) : null)),
+    h('div', { class: 'santa-actions' },
+      h('a', { class: 'btn small', href: `#/u/${t.id}` }, `Ouvrir la lettre de ${t.name}`),
+      h('button', { class: 'btn ghost small', onclick: () => { state.revealed = false; renderView(); } }, 'Cacher')),
+    h('p', { class: 'santa-foot' }, 'Chut, c’est un secret ! 🤫'),
+    foot);
+}
+
+function openDrawDialog(redo) {
+  const budget = h('input', { type: 'text', id: 'd-budget', maxLength: 20, placeholder: 'Ex. 20 € (facultatif)' });
+  const error = h('p', { class: 'error', role: 'alert' });
+  const dialog = openDialog(
+    h('form', {
+      method: 'dialog',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        try {
+          await api('/api/draw', { method: 'POST', json: { budget: budget.value, redo } });
+          state.revealed = false;
+          dialog.close();
+          toast('Tirage fait ! Va découvrir qui tu as tiré 🎅');
+          showApp();
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      },
+    },
+    h('h2', {}, redo ? 'Refaire le tirage ?' : 'Lancer le tirage au sort'),
+    h('p', { class: 'page-sub', style: 'margin-top:6px' }, redo
+      ? 'Attention : le tirage actuel est annulé et tout le monde devra redécouvrir sa personne.'
+      : `Chacun des ${state.data.users.length} membres de la famille se verra attribuer une personne, en privé. Personne d’autre, pas même toi, ne verra les autres couples.`),
+    h('label', { class: 'field', for: 'd-budget' }, 'Budget conseillé'), budget,
+    error,
+    h('div', { class: 'modal-actions' },
+      h('button', { type: 'button', class: 'btn ghost', onclick: () => dialog.close() }, 'Annuler'),
+      h('button', { class: 'btn', type: 'submit' }, redo ? 'Refaire le tirage' : '🎲 Tirer au sort')))
+  );
+  budget.focus();
+}
+
+// --- Surprends-moi ---
+
+function openSurprise() {
+  const pool = availableGifts();
+  if (!pool.length) return toast('Tout est déjà réservé, bravo la famille ! 🎉');
+  let current = null;
+  const content = h('div', { class: 'content surprise' });
+  const dialog = openDialog(content);
+
+  function draw() {
+    let next;
+    do next = pool[Math.floor(Math.random() * pool.length)];
+    while (pool.length > 1 && next === current);
+    current = next;
+    const g = current;
+    content.replaceChildren(
+      h('h2', {}, '🎲 Et si tu offrais…'),
+      h('div', { class: 'surprise-card' },
+        h('div', { class: 'thumb' }, h('div', { class: 'in' }, g.image ? h('img', { src: g.image, alt: '' }) : '🎁')),
+        h('div', { class: 'info' },
+          h('div', { class: 'title' }, g.title),
+          h('div', { class: 'meta' }, g.price ? h('span', { class: 'price' }, priceText(g.price)) : null, h('a', { class: 'who-tag', href: `#/u/${g.owner.id}` }, `pour ${g.owner.name}`)),
+          g.note ? h('div', { class: 'note' }, g.note) : null)),
+      h('div', { class: 'modal-actions', style: 'justify-content:space-between;flex-wrap:wrap' },
+        h('button', { class: 'btn ghost small', onclick: draw }, '🎲 Un autre !'),
+        h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' },
+          h('a', { class: 'btn ghost small', href: `#/u/${g.owner.id}`, onclick: () => dialog.close() }, 'Voir sa lettre'),
+          h('button', { class: 'btn green small', onclick: (e) => { dialog.close(); claim(g, e.currentTarget); } }, '🎁 Je m’en occupe'))));
+  }
+  draw();
+}
+
 function envelope(u, mine) {
   const gifts = u.gifts;
   const taken = gifts.filter((g) => g.claimedBy).length;
   const thumbs = [...gifts].sort((a, b) => Number(b.love) - Number(a.love)).slice(0, 4);
-  return h('a', { class: 'envelope', href: `#/u/${u.id}` },
+  return h('a', { class: `envelope ${paperClass(u)}`, href: `#/u/${u.id}` },
     h('div', { class: 'stamp', 'aria-hidden': 'true' }, avatar(u, 48), h('small', {}, 'NOËL')),
     h('div', { class: 'to' }, mine ? 'Ma lettre au Père Noël' : 'Lettre au Père Noël'),
     h('div', { class: 'who' }, mine ? 'Moi' : u.name),
@@ -417,7 +564,10 @@ function viewLetter({ id }) {
   const gifts = owner.gifts;
   const cats = [...new Set(gifts.map((g) => g.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
   if (state.cat && !cats.includes(state.cat)) state.cat = null;
-  const shown = state.cat ? gifts.filter((g) => g.category === state.cat) : gifts;
+  const band = PRICE_BANDS[state.price][1];
+  const shown = gifts.filter((g) => (!state.cat || g.category === state.cat) && (state.price === 'all' || (g.price && band(priceNum(g.price)))));
+  const priced = gifts.filter((g) => g.price).length >= 3;
+  const santaTarget = state.revealed && state.data.draw?.target?.id === owner.id;
   const taken = gifts.filter((g) => g.claimedBy).length;
   const total = gifts.reduce((s, g) => s + priceNum(g.price), 0);
 
@@ -433,21 +583,26 @@ function viewLetter({ id }) {
   if (!gifts.length) {
     list = h('div', { class: 'empty' }, h('div', { class: 'big', 'aria-hidden': 'true' }, '🎁'),
       h('p', {}, mine ? 'Ta lettre est vide. Qu’est-ce qui te ferait plaisir ?' : 'Rien pour le moment…'));
+  } else if (!shown.length) {
+    list = h('div', { class: 'empty' }, h('p', {}, 'Aucune idée dans cette sélection.'));
   } else if (state.cat || !cats.length) {
     list = h('div', {}, sortGifts(shown, state.sort).map((g) => giftRow(g, { owner, mine })));
   } else {
-    const groups = [...cats.map((c) => [c, gifts.filter((g) => g.category === c)]), ['Autres idées', gifts.filter((g) => !g.category)]].filter(([, l]) => l.length);
+    const groups = [...cats.map((c) => [c, shown.filter((g) => g.category === c)]), ['Autres idées', shown.filter((g) => !g.category)]].filter(([, l]) => l.length);
     list = h('div', {}, groups.map(([title, items]) => [h('h3', { class: 'cat-title' }, title), sortGifts(items, state.sort).map((g) => giftRow(g, { owner, mine }))]));
   }
 
   return [
     h('a', { class: 'back', href: '#/' }, '‹ Toutes les lettres'),
-    h('article', { class: 'paper' },
+    santaTarget ? h('div', { class: 'santa-banner' }, `🎅 Tu as tiré ${owner.name} : c’est à cette personne que tu offres un cadeau. Chut !`) : null,
+    h('article', { class: `paper ${paperClass(owner)}` },
       h('div', { class: 'letter-top' },
         h('div', { style: 'min-width:0;flex:1' }, h('div', { class: 'dear' }, mine ? 'Cher Père Noël,' : `Lettre de ${owner.name}`)),
         h('div', { class: 'stamp', style: 'position:static', 'aria-hidden': 'true' }, avatar(owner, 48), h('small', {}, 'NOËL'))),
       letter,
-      mine ? h('div', { class: 'edit-note' }, h('button', { class: 'btn ghost small', onclick: openLetterDialog }, owner.letter ? '✏️ Modifier mon mot' : '✏️ Écrire mon mot')) : null,
+      h('div', { class: 'edit-note' },
+        mine ? h('button', { class: 'btn ghost small', onclick: openLetterDialog }, owner.letter ? '✏️ Modifier mon mot' : '✏️ Écrire mon mot') : null,
+        h('button', { class: 'btn ghost small', onclick: () => shareLetter(owner) }, '📤 Partager')),
       mine ? quickAdd() : null,
       gifts.length ? h('div', { class: 'toolbar' },
         h('div', { class: 'summary' }, plural(gifts.length, 'idée', 'idées'), ' ',
@@ -456,6 +611,9 @@ function viewLetter({ id }) {
       cats.length > 0 ? h('div', { class: 'chips', role: 'group', 'aria-label': 'Catégories' },
         [h('button', { class: 'chip-btn', 'aria-pressed': String(!state.cat), onclick: () => { state.cat = null; renderView(); } }, 'Tout'),
           ...cats.map((c) => h('button', { class: 'chip-btn', 'aria-pressed': String(state.cat === c), onclick: () => { state.cat = c; renderView(); } }, c))]) : null,
+      priced ? h('div', { class: 'chips', role: 'group', 'aria-label': 'Prix' },
+        Object.entries(PRICE_BANDS).map(([key, [label]]) =>
+          h('button', { class: 'chip-btn price-chip', 'aria-pressed': String(state.price === key), onclick: () => { state.price = key; renderView(); } }, label))) : null,
       list,
       h('div', { class: 'sign' }, h('div', { class: 'l' }, 'Merci beaucoup, et joyeux Noël !'), h('div', { class: 's' }, mine ? 'Moi' : owner.name))),
   ];
@@ -495,7 +653,9 @@ function giftRow(g, { owner, mine, showOwner }) {
   } else if (!claimed) {
     acts.append(h('button', { class: 'btn green small', onclick: (e) => claim(g, e.currentTarget) }, '🎁 Je m’en occupe'));
   } else if (claimed.id === me.id) {
-    acts.append(h('button', { class: 'btn ghost small', onclick: (e) => claim(g, e.currentTarget) }, 'Annuler'));
+    acts.append(
+      h('button', { class: 'btn small ' + (g.bought ? 'green' : 'ghost'), 'aria-pressed': String(g.bought), onclick: (e) => toggleBought(g, e.currentTarget) }, g.bought ? '✅ Acheté' : '☐ Marquer acheté'),
+      h('button', { class: 'btn ghost small', onclick: (e) => claim(g, e.currentTarget) }, 'Annuler'));
   }
   if (g.url) acts.append(h('a', { class: 'btn ghost small', href: g.url, target: '_blank', rel: 'noopener noreferrer' }, `Voir le produit ↗`));
 
@@ -511,7 +671,7 @@ function giftRow(g, { owner, mine, showOwner }) {
         site ? h('span', { class: 'store' }, `🔗 ${site}`) : null,
         showOwner ? h('a', { class: 'who-tag', href: `#/u/${owner.id}` }, `pour ${owner.name}`) : null),
       g.note ? h('div', { class: 'note' }, g.note) : null,
-      !mine && claimed ? h('span', { class: 'taken-by' }, claimed.id === me.id ? '✓ Tu l’offres' : `🎁 Réservé par ${claimed.name}`) : null),
+      !mine && claimed ? h('span', { class: 'taken-by' }, claimed.id === me.id ? (g.bought ? '✅ Acheté !' : '✓ Tu l’offres') : `🎁 Réservé par ${claimed.name}`) : null),
     acts);
 }
 
@@ -529,6 +689,37 @@ async function claim(g, el) {
   showApp();
 }
 
+async function toggleBought(g, el) {
+  try {
+    await api(`/api/gifts/${g.id}/bought`, { method: 'POST' });
+    if (!g.bought) {
+      burst(el);
+      toast('Bravo, un de moins sur la liste ! 🎉');
+    }
+  } catch (err) {
+    toast(err.message);
+  }
+  showApp();
+}
+
+async function shareLetter(owner) {
+  const url = `${location.origin}${location.pathname}#/u/${owner.id}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'Noël en famille', text: `La lettre de ${owner.name}`, url });
+      return;
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Lien copié 📋');
+  } catch {
+    toast(url);
+  }
+}
+
 async function removeGift(g) {
   if (!confirm(`Supprimer « ${g.title} » de ta lettre ?`)) return;
   await api(`/api/gifts/${g.id}`, { method: 'DELETE' });
@@ -540,6 +731,7 @@ async function removeGift(g) {
 function viewOffrir() {
   const claims = myClaims();
   const total = claims.reduce((s, g) => s + priceNum(g.price), 0);
+  const bought = claims.filter((g) => g.bought).length;
   const byOwner = state.data.users.map((u) => [u, claims.filter((g) => g.owner.id === u.id)]).filter(([, l]) => l.length);
 
   const head = h('div', {}, h('h1', { class: 'page-title' }, 'Mes cadeaux à offrir'),
@@ -554,7 +746,11 @@ function viewOffrir() {
 
   return [
     head,
-    h('div', { class: 'budget' }, h('span', {}, `${plural(claims.length, 'cadeau', 'cadeaux')} à offrir`), h('strong', {}, money(total))),
+    h('div', { class: 'budget' },
+      h('div', { class: 'budget-top' }, h('span', {}, `${plural(claims.length, 'cadeau', 'cadeaux')} à offrir`), h('strong', {}, money(total))),
+      h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(claims.length), 'aria-valuenow': String(bought) },
+        h('span', { style: `width:${Math.round((bought / claims.length) * 100)}%` })),
+      h('div', { class: 'budget-sub' }, bought === claims.length ? '🎉 Tout est acheté, bravo !' : `${bought} acheté${bought > 1 ? 's' : ''} sur ${claims.length}`)),
     byOwner.map(([u, list]) =>
       h('section', { class: 'panel' },
         h('div', { class: 'group-head' }, avatar(u, 40), h('a', { href: `#/u/${u.id}` }, u.name),
@@ -588,6 +784,14 @@ function openDialog(...content) {
 function openProfile() {
   const me = state.data.me;
   let chosen = me.avatar;
+  let paper = me.paper;
+  const snow = h('input', { type: 'checkbox', checked: snowEnabled() });
+  const swatches = h('div', { class: 'swatches', role: 'group', 'aria-label': 'Papier à lettres' });
+  const drawSwatches = () =>
+    swatches.replaceChildren(...PAPERS.map(([id, label]) =>
+      h('button', { type: 'button', class: `swatch theme-${id}`, 'aria-pressed': String(id === paper), onclick: () => { paper = id; drawSwatches(); } },
+        h('span', { class: 'chip-frame' }), label)));
+  drawSwatches();
   const pin = h('input', { type: 'password', id: 'p-pin', maxLength: 40, placeholder: 'Nouveau code (4 caractères minimum)', autocomplete: 'new-password' });
   const error = h('p', { class: 'error', role: 'alert' });
 
@@ -597,7 +801,8 @@ function openProfile() {
       onsubmit: async (e) => {
         e.preventDefault();
         try {
-          await api('/api/profile', { method: 'PUT', json: { avatar: chosen, pin: pin.value } });
+          await api('/api/profile', { method: 'PUT', json: { avatar: chosen, paper, pin: pin.value } });
+          setSnow(snow.checked);
           dialog.close();
           showApp();
         } catch (err) {
@@ -608,6 +813,9 @@ function openProfile() {
     h('h2', {}, `Salut ${me.name} !`),
     h('label', { class: 'field' }, 'Mon avatar'),
     avatarPicker(chosen, (a) => (chosen = a)),
+    h('label', { class: 'field' }, 'Mon papier à lettres'),
+    swatches,
+    h('label', { class: 'check' }, snow, '❄️ Neige qui tombe'),
     h('label', { class: 'field', for: 'p-pin' }, me.hasPin ? 'Changer mon code' : 'Protéger mon profil avec un code (facultatif)'),
     pin,
     me.hasPin ? h('button', {
@@ -788,6 +996,8 @@ setInterval(() => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
   if (state.data && !document.hidden && !typing && !document.querySelector('dialog[open]')) showApp().catch(() => {});
 }, 30000);
+
+applySnow();
 
 if (window.NOEL_DEMO) {
   document.body.prepend(h('div', { class: 'demo-ribbon' }, 'Démo : tes données restent sur cet appareil. Le vrai site partagé tourne sur ton NAS.'));

@@ -12,6 +12,14 @@ Un petit site pour que chacun note ses envies de cadeaux de Noël, et que les au
 
 Chaque personne a sa **lettre au Père Noël** : un petit mot, puis la liste de ses idées rangée par rayons (Livres, Jeux, Maison…), avec photo, prix, site marchand et coups de cœur. Un onglet **À offrir** rassemble tout ce qu'on a réservé, avec le budget. Il n'y a pas de panier ni de commande : c'est juste une liste partagée.
 
+### Les petits plus
+- **🎅 Père Noël secret** : un tirage au sort où chacun découvre en privé la personne à qui offrir un cadeau (budget conseillé facultatif). Personne ne peut voir les couples des autres, mais les données du tirage sont dans `data/data.json`, lisible par qui administre le NAS.
+- **🎲 Surprends-moi** : propose au hasard un cadeau encore disponible.
+- **Encore disponibles** : les idées des autres que personne n'a réservées.
+- **✅ Acheté** : sur « À offrir », on coche ce qu'on a déjà acheté, avec une barre de progression. Seul celui qui offre le voit.
+- **Filtres** par rayon et par prix, tri, total de la liste.
+- **Papier à lettres** au choix (par avion, houx, doré, neige), neige qui tombe (désactivable), bouton **Partager** sur chaque lettre.
+
 Aucune dépendance : Node 20+ suffit (testé avec Node 22). Les données sont dans `data/` (un fichier JSON et les photos).
 
 ## Démo en ligne
