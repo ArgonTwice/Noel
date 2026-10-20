@@ -21,11 +21,17 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // --- Stockage : un petit fichier JSON, relu à chaque requête (quelques Ko en famille) ---
 
 function readDb() {
+  let db;
   try {
-    return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+    db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   } catch {
-    return { users: [], gifts: [], sessions: {} };
+    db = { users: [], gifts: [], sessions: {} };
   }
+  if (!db.secret) {
+    db.secret = crypto.randomBytes(32).toString('hex');
+    writeDb(db);
+  }
+  return db;
 }
 
 function writeDb(db) {
@@ -246,17 +252,21 @@ function giftFields(body) {
     url: cleanUrl(body.url),
     price: clean(body.price, 20),
     note: clean(body.note, 400),
+    love: Boolean(body.love),
     image: /^\/uploads\/[a-f0-9]+\.\w+$/.test(image) ? image : '',
   };
 }
 
+const AVATARS = ['🦊', '🐻', '🐼', '🦁', '🐯', '🐸', '🐧', '🦉', '🐙', '🦄', '🐢', '🐰', '🎅', '🤶', '⛄', '🦌', '🧝', '🐶', '🐱', '🐨'];
+
+const publicUser = (u) => ({ id: u.id, name: u.name, avatar: u.avatar || '🎅', hasPin: Boolean(u.hash) });
+
 function view(db, me) {
   const byId = Object.fromEntries(db.users.map((u) => [u.id, u]));
   return {
-    me: { id: me.id, name: me.name },
+    me: publicUser(me),
     users: db.users.map((u) => ({
-      id: u.id,
-      name: u.name,
+      ...publicUser(u),
       gifts: db.gifts
         .filter((g) => g.userId === u.id)
         .map(({ claimedBy, ...g }) => ({
@@ -268,15 +278,23 @@ function view(db, me) {
   };
 }
 
-function login(db, res, user) {
+const cookieFlags = () => `HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 365}${process.env.COOKIE_SECURE === '1' ? '; Secure' : ''}`;
+const gateToken = (db) => crypto.createHmac('sha256', db.secret).update(FAMILY_CODE).digest('hex');
+const isUnlocked = (req, db) => !FAMILY_CODE || cookie(req, 'noel_gate') === gateToken(db);
+
+function startSession(db, res, user) {
   const token = crypto.randomBytes(24).toString('hex');
   db.sessions[token] = user.id;
   writeDb(db);
-  const secure = process.env.COOKIE_SECURE === '1' ? '; Secure' : '';
-  const maxAge = 60 * 60 * 24 * 120;
-  send(res, 200, { ok: true }, {
-    'Set-Cookie': `noel=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${secure}`,
-  });
+  send(res, 200, { ok: true }, { 'Set-Cookie': `noel=${token}; ${cookieFlags()}` });
+}
+
+const cleanAvatar = (v) => (AVATARS.includes(v) ? v : AVATARS[Math.floor(Math.random() * AVATARS.length)]);
+
+function cleanPin(v) {
+  const pin = clean(v, 40);
+  if (pin && pin.length < 4) throw new HttpError(400, 'Ton code doit faire au moins 4 caractères');
+  return pin;
 }
 
 async function api(req, res, pathname) {
@@ -284,39 +302,50 @@ async function api(req, res, pathname) {
   const method = req.method;
 
   if (method === 'GET' && pathname === '/api/config') {
+    const unlocked = isUnlocked(req, db);
     return send(res, 200, {
-      needsCode: Boolean(FAMILY_CODE),
-      names: db.users.map((u) => u.name),
+      locked: !unlocked,
+      avatars: AVATARS,
+      users: unlocked ? db.users.map(publicUser) : [],
     });
   }
 
-  if (method === 'POST' && pathname === '/api/register') {
+  // Code famille : demandé une seule fois par appareil, si FAMILY_CODE est défini
+  if (method === 'POST' && pathname === '/api/unlock') {
     throttle(req);
+    const { code } = await readJson(req);
+    if (!FAMILY_CODE || clean(code, 100) !== FAMILY_CODE) throw new HttpError(403, 'Ce n’est pas le bon code');
+    return send(res, 200, { ok: true }, { 'Set-Cookie': `noel_gate=${gateToken(db)}; ${cookieFlags()}` });
+  }
+
+  if (method === 'POST' && pathname === '/api/join') {
+    throttle(req);
+    if (!isUnlocked(req, db)) throw new HttpError(403, 'Code famille requis');
     const body = await readJson(req);
     const name = clean(body.name, 30);
-    const pin = clean(body.pin, 40);
     if (!name) throw new HttpError(400, 'Indique ton prénom');
-    if (pin.length < 4) throw new HttpError(400, 'Ton code doit faire au moins 4 caractères');
-    if (FAMILY_CODE && clean(body.familyCode, 100) !== FAMILY_CODE) throw new HttpError(403, 'Code famille incorrect');
     if (db.users.some((u) => u.name.toLowerCase() === name.toLowerCase())) {
-      throw new HttpError(409, 'Ce prénom existe déjà, connecte-toi plutôt');
+      throw new HttpError(409, 'Ce prénom existe déjà : touche-le dans la liste pour te connecter');
     }
-    const user = { id: uid(), name, ...hashPin(pin) };
+    const pin = cleanPin(body.pin);
+    const user = { id: uid(), name, avatar: cleanAvatar(body.avatar), ...(pin ? hashPin(pin) : {}) };
     db.users.push(user);
-    return login(db, res, user);
+    return startSession(db, res, user);
   }
 
   if (method === 'POST' && pathname === '/api/login') {
     throttle(req);
+    if (!isUnlocked(req, db)) throw new HttpError(403, 'Code famille requis');
     const body = await readJson(req);
-    const user = db.users.find((u) => u.name.toLowerCase() === clean(body.name, 30).toLowerCase());
-    if (!user || !checkPin(clean(body.pin, 40), user)) throw new HttpError(401, 'Prénom ou code incorrect');
-    return login(db, res, user);
+    const user = db.users.find((u) => u.id === body.id);
+    if (!user) throw new HttpError(404, 'Profil introuvable');
+    if (user.hash && !checkPin(clean(body.pin, 40), user)) throw new HttpError(401, 'Code incorrect');
+    return startSession(db, res, user);
   }
 
   // Tout ce qui suit demande d'être connecté
   const token = cookie(req, 'noel');
-  const me = token && db.users.find((u) => u.id === db.sessions[token]);
+  const me = isUnlocked(req, db) && token && db.users.find((u) => u.id === db.sessions[token]);
   if (!me) throw new HttpError(401, 'Non connecté');
 
   if (method === 'POST' && pathname === '/api/logout') {
@@ -326,6 +355,19 @@ async function api(req, res, pathname) {
   }
 
   if (method === 'GET' && pathname === '/api/state') return send(res, 200, view(db, me));
+
+  if (method === 'PUT' && pathname === '/api/profile') {
+    const body = await readJson(req);
+    if (body.avatar) me.avatar = cleanAvatar(body.avatar);
+    if (body.pin === null) {
+      delete me.hash;
+      delete me.salt;
+    } else if (typeof body.pin === 'string' && body.pin.trim()) {
+      Object.assign(me, hashPin(cleanPin(body.pin)));
+    }
+    writeDb(db);
+    return send(res, 200, { ok: true });
+  }
 
   if (method === 'POST' && pathname === '/api/preview') {
     const { url } = await readJson(req);

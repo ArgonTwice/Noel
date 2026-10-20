@@ -1,7 +1,7 @@
 'use strict';
 
-const app = document.getElementById('app');
-const state = { config: null, data: null, selected: null, tab: 'login' };
+const root = document.getElementById('app');
+const state = { config: null, data: null, selected: null };
 
 // --- Aides ---
 
@@ -11,8 +11,9 @@ function h(tag, attrs, ...children) {
     if (value == null || value === false) continue;
     if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
     else if (key === 'class') el.className = value;
+    else if (key === 'style') el.setAttribute('style', value);
     else if (key in el && key !== 'list') el[key] = value;
-    else el.setAttribute(key, value);
+    else el.setAttribute(key, value === true ? '' : value);
   }
   for (const child of children.flat()) {
     if (child == null || child === false) continue;
@@ -38,91 +39,162 @@ async function api(path, options = {}) {
   return body;
 }
 
-// --- Connexion ---
-
-async function showLogin(message) {
-  state.data = null;
-  state.config = await api('/api/config');
-  if (!state.config.names.length) state.tab = 'register';
-  renderLogin(message);
+function toast(message) {
+  const el = h('div', { class: 'toast', role: 'status' }, message);
+  document.body.append(el);
+  setTimeout(() => el.remove(), 3000);
 }
 
-function renderLogin(message) {
-  const registering = state.tab === 'register';
-  const error = h('p', { class: 'error', role: 'alert' }, message || '');
-  let chosen = '';
+function avatar(user, size = 56) {
+  let hash = 0;
+  for (const c of user.id) hash = (hash * 31 + c.charCodeAt(0)) % 360;
+  return h('span', { class: 'avatar', 'aria-hidden': 'true', style: `--size:${size}px;--bg:hsl(${hash} 60% 88%)` }, user.avatar);
+}
 
-  const pin = h('input', { type: 'password', id: 'pin', autocomplete: registering ? 'new-password' : 'current-password', required: true });
-  const nameInput = h('input', { type: 'text', id: 'name', maxLength: 30, autocomplete: 'given-name', required: true });
-  const codeInput = h('input', { type: 'password', id: 'fam', autocomplete: 'off' });
+function daysToChristmas() {
+  const now = new Date();
+  let noel = new Date(now.getFullYear(), 11, 25);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (today > noel) noel = new Date(now.getFullYear() + 1, 11, 25);
+  return Math.round((noel - today) / 86400000);
+}
 
-  const names = h(
-    'div',
-    { class: 'names' },
-    state.config.names.map((n) =>
-      h('button', {
-        type: 'button',
-        onclick: (e) => {
-          chosen = n;
-          names.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
-          pin.focus();
-        },
-      }, n)
-    )
+function countdownText() {
+  const d = daysToChristmas();
+  if (d === 0) return '🎉 Joyeux Noël !';
+  if (d === 1) return 'Plus qu’un dodo avant Noël';
+  return `Plus que ${d} jours avant Noël`;
+}
+
+// --- Accueil : code famille, choix du profil, création ---
+
+function welcome(...content) {
+  root.replaceChildren(
+    h('div', { class: 'welcome' },
+      h('div', { class: 'snow', 'aria-hidden': 'true' }),
+      h('div', { class: 'brand' },
+        h('div', { class: 'tree', 'aria-hidden': 'true' }, '🎄'),
+        h('h1', {}, 'Noël en famille'),
+        h('span', { class: 'countdown' }, countdownText())),
+      h('div', { class: 'card' }, content))
   );
+}
 
-  const form = h(
-    'form',
-    {
+async function showWelcome() {
+  state.data = null;
+  state.config = await api('/api/config');
+  if (state.config.locked) return screenGate();
+  if (!state.config.users.length) return screenJoin(true);
+  screenWho();
+}
+
+function screenGate() {
+  const input = h('input', { type: 'password', class: 'big-input', placeholder: 'Code famille', autocomplete: 'off', required: true });
+  const error = h('p', { class: 'error', role: 'alert' });
+  welcome(
+    h('h2', {}, 'Bienvenue 👋'),
+    h('p', { class: 'lead' }, 'Entre le code que la famille t’a donné. On ne te le demandera qu’une fois sur cet appareil.'),
+    h('form', {
       onsubmit: async (e) => {
         e.preventDefault();
-        error.textContent = '';
-        const name = registering ? nameInput.value.trim() : chosen;
-        if (!name) {
-          error.textContent = registering ? 'Indique ton prénom' : 'Touche ton prénom dans la liste';
-          return;
-        }
         try {
-          await api(registering ? '/api/register' : '/api/login', {
-            method: 'POST',
-            json: { name, pin: pin.value, familyCode: codeInput.value },
-          });
+          await api('/api/unlock', { method: 'POST', json: { code: input.value } });
+          showWelcome();
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      },
+    }, input, error, h('button', { class: 'btn full', type: 'submit' }, 'Entrer'))
+  );
+  input.focus();
+}
+
+function screenWho() {
+  const { users } = state.config;
+  welcome(
+    h('h2', {}, 'Qui es-tu ?'),
+    h('p', { class: 'lead' }, 'Touche ton prénom pour retrouver ta liste.'),
+    h('div', { class: 'tiles' },
+      users.map((u) =>
+        h('button', { class: 'tile', onclick: () => (u.hasPin ? screenPin(u) : signIn(u)) },
+          u.hasPin ? h('span', { class: 'lock', 'aria-label': 'protégé par un code' }, '🔒') : null,
+          avatar(u, 56), h('span', { class: 'name' }, u.name))),
+      h('button', { class: 'tile new', onclick: () => screenJoin(false) },
+        h('span', { class: 'plus', 'aria-hidden': 'true' }, '＋'), h('span', {}, 'Nouveau')))
+  );
+}
+
+async function signIn(user, pin) {
+  await api('/api/login', { method: 'POST', json: { id: user.id, pin } });
+  await showApp();
+}
+
+function screenPin(user) {
+  const input = h('input', { type: 'password', class: 'big-input', placeholder: 'Ton code', autocomplete: 'current-password', required: true });
+  const error = h('p', { class: 'error', role: 'alert' });
+  welcome(
+    h('div', { class: 'pin-who' }, avatar(user, 72), h('strong', {}, `Salut ${user.name} !`)),
+    h('form', {
+      onsubmit: async (e) => {
+        e.preventDefault();
+        try {
+          await signIn(user, input.value);
+        } catch (err) {
+          error.textContent = err.message;
+          input.select();
+        }
+      },
+    }, input, error, h('button', { class: 'btn full', type: 'submit' }, 'Entrer')),
+    h('p', { class: 'center' }, h('button', { class: 'link', onclick: screenWho }, '← Ce n’est pas moi'))
+  );
+  input.focus();
+}
+
+function avatarPicker(initial, onPick) {
+  let current = initial;
+  const wrap = h('div', { class: 'avatars', role: 'group', 'aria-label': 'Choisis ton avatar' });
+  const draw = () =>
+    wrap.replaceChildren(
+      ...state.config.avatars.map((a) =>
+        h('button', { type: 'button', 'aria-pressed': String(a === current), 'aria-label': a, onclick: () => { current = a; onPick(a); draw(); } }, a))
+    );
+  draw();
+  return wrap;
+}
+
+function screenJoin(first) {
+  let chosen = state.config.avatars[Math.floor(Math.random() * state.config.avatars.length)];
+  const name = h('input', { type: 'text', class: 'big-input', maxLength: 30, placeholder: 'Ton prénom', autocomplete: 'given-name', required: true });
+  const pin = h('input', { type: 'password', maxLength: 40, placeholder: '4 caractères minimum', autocomplete: 'new-password' });
+  const error = h('p', { class: 'error', role: 'alert' });
+
+  welcome(
+    h('h2', {}, first ? 'Crée ton profil' : 'Bienvenue !'),
+    h('p', { class: 'lead' }, first ? 'Tu es le premier ! Les autres pourront te rejoindre ensuite.' : 'Dis-nous qui tu es, c’est tout.'),
+    h('form', {
+      class: 'stack',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        try {
+          await api('/api/join', { method: 'POST', json: { name: name.value, avatar: chosen, pin: pin.value } });
           await showApp();
         } catch (err) {
           error.textContent = err.message;
         }
       },
     },
-    registering
-      ? [h('label', { for: 'name' }, 'Ton prénom'), nameInput]
-      : [h('label', {}, 'Qui es-tu ?'), names],
-    h('label', { for: 'pin' }, registering ? 'Choisis un code secret (4 caractères minimum)' : 'Ton code secret'),
-    pin,
-    registering && state.config.needsCode ? [h('label', { for: 'fam' }, 'Code famille (demande-le à la famille)'), codeInput] : null,
-    error,
-    h('button', { class: 'btn full', type: 'submit' }, registering ? 'Créer mon espace' : 'Entrer')
+      name,
+      h('label', { class: 'field' }, 'Ton avatar'),
+      avatarPicker(chosen, (a) => (chosen = a)),
+      h('details', { class: 'opt' },
+        h('summary', {}, 'Protéger mon profil avec un code (facultatif)'),
+        h('p', {}, 'Sans code, n’importe qui de la famille peut se connecter en touchant ton prénom. Avec un code, il faudra le saisir.'),
+        pin),
+      error,
+      h('button', { class: 'btn full', type: 'submit' }, 'C’est parti 🎁')),
+    first ? null : h('p', { class: 'center' }, h('button', { class: 'link', onclick: screenWho }, '← Retour'))
   );
-
-  const tab = (id, label) =>
-    h('button', {
-      type: 'button',
-      class: state.tab === id ? 'on' : '',
-      onclick: () => {
-        state.tab = id;
-        renderLogin();
-      },
-    }, label);
-
-  app.replaceChildren(
-    h(
-      'div',
-      { class: 'login' },
-      h('div', { class: 'tree', 'aria-hidden': 'true' }, '🎄'),
-      h('h1', {}, 'Noël en famille'),
-      h('p', { class: 'sub' }, 'Note tes envies, découvre celles des autres.'),
-      h('div', { class: 'panel' }, state.config.names.length ? h('div', { class: 'tabs' }, tab('login', 'Je me connecte'), tab('register', 'Je m’inscris')) : null, form)
-    )
-  );
+  name.focus();
 }
 
 // --- Application ---
@@ -131,7 +203,7 @@ async function showApp() {
   try {
     state.data = await api('/api/state');
   } catch (err) {
-    if (err.status === 401) return showLogin();
+    if (err.status === 401) return showWelcome();
     throw err;
   }
   const ids = state.data.users.map((u) => u.id);
@@ -145,46 +217,51 @@ function renderApp() {
   const ordered = [users.find((u) => u.id === me.id), ...users.filter((u) => u.id !== me.id)];
   const current = users.find((u) => u.id === state.selected);
   const mine = current.id === me.id;
+  const taken = current.gifts.filter((g) => g.claimedBy).length;
 
-  const people = h(
-    'nav',
-    { class: 'people', 'aria-label': 'Listes de la famille' },
+  const people = h('nav', { class: 'people', 'aria-label': 'Listes de la famille' },
     ordered.map((u) =>
       h('button', {
         class: 'person' + (u.id === current.id ? ' on' : ''),
+        'aria-current': u.id === current.id ? 'true' : null,
         onclick: () => {
           state.selected = u.id;
           history.replaceState(null, '', '#' + u.id);
           renderApp();
+          window.scrollTo({ top: 0 });
         },
-      }, u.id === me.id ? 'Ma liste' : u.name, h('small', {}, String(u.gifts.length)))
-    )
+      },
+      avatar(u, 56),
+      u.gifts.length ? h('span', { class: 'n' }, String(u.gifts.length)) : null,
+      h('span', { class: 'label' }, u.id === me.id ? 'Moi' : u.name)))
   );
 
-  const head = h(
-    'div',
-    { class: 'section-head' },
-    h('div', {}, h('h2', {}, mine ? 'Ma liste de Noël' : `Liste de ${current.name}`),
-      mine ? h('p', { class: 'hint' }, 'Les autres voient ta liste, mais pas qui réserve quoi : la surprise reste entière.') : null),
-    mine ? h('button', { class: 'btn', onclick: () => openGiftDialog() }, '＋ Ajouter un cadeau') : null
-  );
+  const subtitle = mine
+    ? 'Les autres voient ta liste, mais pas qui réserve quoi.'
+    : `${current.gifts.length} idée${current.gifts.length > 1 ? 's' : ''}${current.gifts.length ? ` · ${taken} déjà réservée${taken > 1 ? 's' : ''}` : ''}`;
 
-  let content;
-  if (!current.gifts.length) {
-    content = h('div', { class: 'empty' }, h('div', { class: 'big', 'aria-hidden': 'true' }, '🎁'),
-      h('p', {}, mine ? 'Ta liste est vide. Ajoute ta première envie !' : `${current.name} n’a encore rien ajouté.`));
-  } else {
-    content = h('div', { class: 'grid' }, current.gifts.map((g) => giftCard(g, mine)));
-  }
+  const head = h('div', { class: 'list-head' }, avatar(current, 64),
+    h('div', {}, h('h2', {}, mine ? 'Ma liste de Noël' : `La liste de ${current.name}`), h('p', {}, subtitle)));
 
-  app.replaceChildren(
-    h('header', { class: 'top' },
-      h('h1', {}, '🎄 Noël en famille'),
-      h('div', { class: 'who' }, `Salut ${me.name}`,
-        h('button', { class: 'btn ghost small', onclick: logout }, 'Quitter'))),
-    people, head, content
+  const content = current.gifts.length
+    ? h('div', { class: 'grid' }, sorted(current.gifts).map((g) => giftCard(g, mine)))
+    : h('div', { class: 'empty' },
+        h('div', { class: 'big', 'aria-hidden': 'true' }, '🎁'),
+        h('p', {}, mine ? 'Ta liste est vide. Qu’est-ce qui te ferait plaisir ?' : `${current.name} n’a pas encore ajouté d’idées.`),
+        mine ? h('button', { class: 'btn', onclick: () => openGiftDialog() }, 'Ajouter ma première idée') : null);
+
+  root.replaceChildren(
+    h('header', { class: 'topbar' },
+      h('div', { class: 'in' },
+        h('div', { class: 'logo' }, h('span', { 'aria-hidden': 'true' }, '🎄'), 'Noël en famille'),
+        h('span', { class: 'count' }, countdownText()),
+        h('button', { class: 'me', onclick: openProfile, 'aria-label': 'Mon profil' }, avatar(me, 34), me.name))),
+    h('main', { class: 'page' }, people, head, content),
+    mine && current.gifts.length ? h('button', { class: 'btn fab', onclick: () => openGiftDialog() }, '＋ Ajouter une idée') : null
   );
 }
+
+const sorted = (gifts) => [...gifts].sort((a, b) => Number(b.love) - Number(a.love) || a.createdAt - b.createdAt);
 
 function giftCard(g, mine) {
   const me = state.data.me;
@@ -204,24 +281,24 @@ function giftCard(g, mine) {
     actions.append(h('button', { class: 'btn ghost small', onclick: () => claim(g) }, 'Annuler ma réservation'));
   }
 
-  return h(
-    'article',
-    { class: 'gift' + (claimed ? ' taken' : '') },
-    h('div', { class: 'pic' }, g.image ? h('img', { src: g.image, alt: '', loading: 'lazy' }) : h('span', { 'aria-hidden': 'true' }, '🎁')),
+  return h('article', { class: 'gift' + (claimed ? ' taken' : '') },
+    h('div', { class: 'pic' },
+      g.image ? h('img', { src: g.image, alt: '', loading: 'lazy' }) : h('span', { 'aria-hidden': 'true' }, '🎁'),
+      g.love ? h('span', { class: 'chip' }, '❤️ Coup de cœur') : null,
+      claimed ? h('span', { class: 'chip taken' }, claimed.id === me.id ? '✓ Tu l’offres' : `✓ ${claimed.name}`) : null),
     h('div', { class: 'body' },
-      claimed ? h('span', { class: 'badge' }, claimed.id === me.id ? '✓ Tu l’offres' : `✓ Pris par ${claimed.name}`) : null,
       h('h3', {}, g.title),
       g.price ? h('p', { class: 'price' }, /[^\d.,\s]/.test(g.price) ? g.price : g.price + ' €') : null,
       g.note ? h('p', { class: 'note' }, g.note) : null,
-      actions)
-  );
+      actions));
 }
 
 async function claim(g) {
   try {
     await api(`/api/gifts/${g.id}/claim`, { method: 'POST' });
+    if (!g.claimedBy) toast('Réservé ! Personne d’autre ne le prendra 🤫');
   } catch (err) {
-    alert(err.message);
+    toast(err.message);
   }
   showApp();
 }
@@ -232,14 +309,65 @@ async function removeGift(g) {
   showApp();
 }
 
-async function logout() {
-  await api('/api/logout', { method: 'POST' });
-  state.selected = null;
-  state.tab = 'login';
-  showLogin();
+// --- Fenêtres ---
+
+function openDialog(...content) {
+  const dialog = h('dialog', { onclose: () => dialog.remove() }, ...content);
+  document.body.append(dialog);
+  dialog.showModal();
+  return dialog;
 }
 
-// --- Ajout / modification d'un cadeau ---
+function openProfile() {
+  const me = state.data.me;
+  let chosen = me.avatar;
+  const pin = h('input', { type: 'password', maxLength: 40, placeholder: 'Nouveau code (4 caractères minimum)', autocomplete: 'new-password' });
+  const error = h('p', { class: 'error', role: 'alert' });
+
+  const dialog = openDialog(
+    h('form', {
+      method: 'dialog',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        try {
+          await api('/api/profile', { method: 'PUT', json: { avatar: chosen, pin: pin.value } });
+          dialog.close();
+          showApp();
+        } catch (err) {
+          error.textContent = err.message;
+        }
+      },
+    },
+    h('h2', {}, `Salut ${me.name} !`),
+    h('label', { class: 'field' }, 'Mon avatar'),
+    avatarPicker(chosen, (a) => (chosen = a)),
+    h('label', { class: 'field', for: 'p-pin' }, me.hasPin ? 'Changer mon code' : 'Protéger mon profil avec un code (facultatif)'),
+    Object.assign(pin, { id: 'p-pin' }),
+    me.hasPin ? h('button', {
+      type: 'button',
+      class: 'link',
+      onclick: async () => {
+        await api('/api/profile', { method: 'PUT', json: { pin: null } });
+        dialog.close();
+        toast('Code retiré');
+        showApp();
+      },
+    }, 'Retirer mon code') : null,
+    error,
+    h('div', { class: 'modal-actions' },
+      h('button', {
+        type: 'button',
+        class: 'btn ghost',
+        onclick: async () => {
+          await api('/api/logout', { method: 'POST' });
+          dialog.close();
+          state.selected = null;
+          showWelcome();
+        },
+      }, 'Me déconnecter'),
+      h('button', { class: 'btn', type: 'submit' }, 'Enregistrer')))
+  );
+}
 
 function resizeImage(file, maxSide = 900) {
   return new Promise((resolve, reject) => {
@@ -264,20 +392,21 @@ function openGiftDialog(gift) {
   let image = gift?.image || '';
 
   const url = h('input', { type: 'text', id: 'g-url', inputMode: 'url', placeholder: 'Colle le lien d’un site (facultatif)', value: gift?.url || '' });
-  const title = h('input', { type: 'text', id: 'g-title', maxLength: 120, required: true, value: gift?.title || '' });
-  const price = h('input', { type: 'text', id: 'g-price', maxLength: 20, placeholder: 'ex. 25', inputMode: 'decimal', value: gift?.price || '' });
+  const title = h('input', { type: 'text', id: 'g-title', maxLength: 120, required: true, placeholder: 'Ex. Casque audio', value: gift?.title || '' });
+  const price = h('input', { type: 'text', id: 'g-price', maxLength: 20, placeholder: 'Ex. 25', inputMode: 'decimal', value: gift?.price || '' });
   const note = h('textarea', { id: 'g-note', maxLength: 400, placeholder: 'Taille, couleur, marque…' }, gift?.note || '');
+  const love = h('input', { type: 'checkbox', checked: Boolean(gift?.love) });
   const status = h('p', { class: 'status', role: 'status' });
   const error = h('p', { class: 'error', role: 'alert' });
   const thumb = h('div', { class: 'thumb' });
   const file = h('input', { type: 'file', accept: 'image/*', hidden: true });
   const save = h('button', { class: 'btn', type: 'submit' }, editing ? 'Enregistrer' : 'Ajouter');
+  const remove = h('button', { type: 'button', class: 'btn ghost small', onclick: () => { image = ''; drawThumb(); } }, 'Retirer la photo');
 
-  const drawThumb = () => {
+  function drawThumb() {
     thumb.replaceChildren(image ? h('img', { src: image, alt: '' }) : '📷');
     remove.hidden = !image;
-  };
-  const remove = h('button', { type: 'button', class: 'btn ghost small', onclick: () => { image = ''; drawThumb(); } }, 'Retirer la photo');
+  }
 
   async function fetchPreview() {
     const link = url.value.trim();
@@ -288,19 +417,18 @@ function openGiftDialog(gift) {
       if (p.title && !title.value.trim()) title.value = p.title;
       if (p.image && !image) image = p.image;
       drawThumb();
-      status.textContent = p.title || p.image ? 'C’est rempli, vérifie et ajuste si besoin.' : 'Rien trouvé sur ce lien, remplis à la main.';
+      status.textContent = p.title || p.image ? '✨ C’est rempli, vérifie et ajuste si besoin.' : 'Rien trouvé sur ce lien, remplis à la main.';
     } catch {
       status.textContent = 'Impossible de lire ce lien, remplis à la main.';
     }
   }
-  url.addEventListener('change', () => { if (!editing || !title.value.trim()) fetchPreview(); });
+  url.addEventListener('change', () => { if (!title.value.trim() || !image) fetchPreview(); });
 
   file.addEventListener('change', async () => {
     if (!file.files[0]) return;
     status.textContent = 'Envoi de la photo…';
     try {
-      const blob = await resizeImage(file.files[0]);
-      image = (await api('/api/upload', { method: 'POST', raw: blob })).image;
+      image = (await api('/api/upload', { method: 'POST', raw: await resizeImage(file.files[0]) })).image;
       drawThumb();
       status.textContent = '';
     } catch (err) {
@@ -308,52 +436,41 @@ function openGiftDialog(gift) {
     }
   });
 
-  const dialog = h(
-    'dialog',
-    { onclose: () => dialog.remove() },
-    h(
-      'form',
-      {
-        method: 'dialog',
-        onsubmit: async (e) => {
-          e.preventDefault();
-          error.textContent = '';
-          save.disabled = true;
-          try {
-            await api(editing ? `/api/gifts/${gift.id}` : '/api/gifts', {
-              method: editing ? 'PUT' : 'POST',
-              json: { title: title.value, url: url.value, price: price.value, note: note.value, image },
-            });
-            dialog.close();
-            showApp();
-          } catch (err) {
-            error.textContent = err.message;
-            save.disabled = false;
-          }
-        },
+  const dialog = openDialog(
+    h('form', {
+      method: 'dialog',
+      onsubmit: async (e) => {
+        e.preventDefault();
+        error.textContent = '';
+        save.disabled = true;
+        try {
+          await api(editing ? `/api/gifts/${gift.id}` : '/api/gifts', {
+            method: editing ? 'PUT' : 'POST',
+            json: { title: title.value, url: url.value, price: price.value, note: note.value, love: love.checked, image },
+          });
+          dialog.close();
+          showApp();
+        } catch (err) {
+          error.textContent = err.message;
+          save.disabled = false;
+        }
       },
-      h('h2', {}, editing ? 'Modifier le cadeau' : 'Nouveau cadeau'),
-      h('label', { for: 'g-url' }, 'Lien'),
-      url,
-      status,
-      h('label', { for: 'g-title' }, 'Nom du cadeau'),
-      title,
-      h('label', { for: 'g-price' }, 'Prix approximatif (€)'),
-      price,
-      h('label', { for: 'g-note' }, 'Précisions'),
-      note,
-      h('label', {}, 'Photo'),
-      h('div', { class: 'photo' }, thumb,
-        h('div', { class: 'col' }, h('button', { type: 'button', class: 'btn ghost small', onclick: () => file.click() }, 'Choisir une photo'), remove), file),
-      error,
-      h('div', { class: 'modal-actions' },
-        h('button', { type: 'button', class: 'btn ghost', onclick: () => dialog.close() }, 'Annuler'), save)
-    )
+    },
+    h('h2', {}, editing ? 'Modifier cette idée' : 'Une nouvelle idée'),
+    h('label', { class: 'field', for: 'g-url' }, 'Un lien ? On remplit le reste pour toi'),
+    url, status,
+    h('label', { class: 'field', for: 'g-title' }, 'Nom du cadeau'), title,
+    h('label', { class: 'field', for: 'g-price' }, 'Prix approximatif (€)'), price,
+    h('label', { class: 'field', for: 'g-note' }, 'Précisions'), note,
+    h('label', { class: 'field' }, 'Photo'),
+    h('div', { class: 'photo' }, thumb,
+      h('div', { class: 'col' }, h('button', { type: 'button', class: 'btn ghost small', onclick: () => file.click() }, 'Choisir une photo'), remove), file),
+    h('label', { class: 'check' }, love, '❤️ C’est mon coup de cœur'),
+    error,
+    h('div', { class: 'modal-actions' }, h('button', { type: 'button', class: 'btn ghost', onclick: () => dialog.close() }, 'Annuler'), save))
   );
 
   drawThumb();
-  document.body.append(dialog);
-  dialog.showModal();
   (editing ? title : url).focus();
 }
 
@@ -363,4 +480,4 @@ setInterval(() => {
   if (state.data && !document.hidden && !document.querySelector('dialog[open]')) showApp().catch(() => {});
 }, 30000);
 
-showApp().catch(() => showLogin());
+showApp().catch(() => showWelcome());

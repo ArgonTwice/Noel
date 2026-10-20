@@ -1,4 +1,4 @@
-// Usage : npm run reset-pin -- "Prénom" nouveau-code
+// Usage : npm run reset-pin -- "Prénom" nouveau-code    (ou "-" pour retirer le code)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,8 +8,8 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const file = path.join(process.env.DATA_DIR || path.join(root, 'data'), 'data.json');
 const [name, pin] = process.argv.slice(2);
 
-if (!name || !pin || pin.length < 4) {
-  console.error('Usage : npm run reset-pin -- "Prénom" nouveau-code (4 caractères minimum)');
+if (!name || !pin || (pin !== '-' && pin.length < 4)) {
+  console.error('Usage : npm run reset-pin -- "Prénom" nouveau-code (4 caractères minimum, ou "-" pour retirer le code)');
   process.exit(1);
 }
 
@@ -20,6 +20,11 @@ if (!user) {
   process.exit(1);
 }
 
-Object.assign(user, hashPin(pin));
+if (pin === '-') {
+  delete user.hash;
+  delete user.salt;
+} else {
+  Object.assign(user, hashPin(pin));
+}
 fs.writeFileSync(file, JSON.stringify(db, null, 2));
-console.log(`Code de ${user.name} mis à jour. Redémarre le serveur pour être sûr.`);
+console.log(pin === '-' ? `Code de ${user.name} retiré.` : `Code de ${user.name} mis à jour.`);
