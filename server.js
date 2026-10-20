@@ -252,6 +252,7 @@ function giftFields(body) {
     url: cleanUrl(body.url),
     price: clean(body.price, 20),
     note: clean(body.note, 400),
+    category: clean(body.category, 30),
     love: Boolean(body.love),
     image: /^\/uploads\/[a-f0-9]+\.\w+$/.test(image) ? image : '',
   };
@@ -259,7 +260,7 @@ function giftFields(body) {
 
 const AVATARS = ['🦊', '🐻', '🐼', '🦁', '🐯', '🐸', '🐧', '🦉', '🐙', '🦄', '🐢', '🐰', '🎅', '🤶', '⛄', '🦌', '🧝', '🐶', '🐱', '🐨'];
 
-const publicUser = (u) => ({ id: u.id, name: u.name, avatar: u.avatar || '🎅', hasPin: Boolean(u.hash) });
+const publicUser = (u) => ({ id: u.id, name: u.name, avatar: u.avatar || '🎅', hasPin: Boolean(u.hash), letter: u.letter || '' });
 
 function view(db, me) {
   const byId = Object.fromEntries(db.users.map((u) => [u.id, u]));
@@ -359,6 +360,7 @@ async function api(req, res, pathname) {
   if (method === 'PUT' && pathname === '/api/profile') {
     const body = await readJson(req);
     if (body.avatar) me.avatar = cleanAvatar(body.avatar);
+    if (typeof body.letter === 'string') me.letter = clean(body.letter, 600);
     if (body.pin === null) {
       delete me.hash;
       delete me.salt;
@@ -433,6 +435,7 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
 };
 
 function serveStatic(req, res, pathname) {

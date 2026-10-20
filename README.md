@@ -10,7 +10,13 @@ Un petit site pour que chacun note ses envies de cadeaux de Noël, et que les au
 - Chacun voit les listes des autres et peut cliquer sur **« Je m'en occupe »** pour réserver un cadeau.
   La personne concernée ne voit jamais qui a réservé quoi, la surprise reste entière.
 
+Chaque personne a sa **lettre au Père Noël** : un petit mot, puis la liste de ses idées rangée par rayons (Livres, Jeux, Maison…), avec photo, prix, site marchand et coups de cœur. Un onglet **À offrir** rassemble tout ce qu'on a réservé, avec le budget. Il n'y a pas de panier ni de commande : c'est juste une liste partagée.
+
 Aucune dépendance : Node 20+ suffit (testé avec Node 22). Les données sont dans `data/` (un fichier JSON et les photos).
+
+## Démo en ligne
+
+Le `index.html` à la racine est une **démo** qui s'ouvre sur GitHub Pages (`https://argontwice.github.io/Noel/`). Elle utilise un faux serveur dans le navigateur (`public/demo.js`) avec une famille d'exemple : les données restent sur l'appareil de chaque visiteur. Elle sert à montrer le rendu. Pour une vraie liste partagée, il faut faire tourner le serveur (voir plus bas).
 
 > Sans code, n'importe qui de la famille peut ouvrir le profil d'un autre. C'est voulu pour rester simple : mets un code sur ton profil si ça te gêne.
 
@@ -58,6 +64,10 @@ Dans Docker : `docker exec noel node scripts/reset-pin.js "Prénom" nouveau-code
 ```
 server.js        serveur HTTP et API
 auth.js          hachage des codes
-public/          interface (HTML, CSS, JS sans framework)
+public/          interface (HTML, CSS, JS sans framework) et polices
+public/demo.js   faux serveur de la démo (GitHub Pages uniquement)
+index.html       page de la démo
 scripts/         outil de réinitialisation des codes
 ```
+
+Polices embarquées (licence SIL OFL) : Caveat, Fraunces et Nunito.
